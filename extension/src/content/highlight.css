@@ -1,0 +1,59 @@
+/* VoxSight Content Script Styles */
+
+.voxsight-highlight {
+  outline: 3px solid #FBBC04 !important;
+  outline-offset: 2px !important;
+  border-radius: 4px !important;
+  animation: voxsight-pulse 1.5s ease-in-out infinite !important;
+}
+
+.voxsight-highlight-cursor {
+  position: fixed;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(26, 115, 232, 0.4);
+  border: 2px solid #1A73E8;
+  pointer-events: none;
+  z-index: 2147483647;
+  animation: voxsight-cursor-pulse 0.8s ease-in-out;
+}
+
+.voxsight-label {
+  position: fixed;
+  background: #1A73E8;
+  color: #FFFFFF;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-weight: 500;
+  pointer-events: none;
+  z-index: 2147483647;
+  white-space: nowrap;
+}
+
+@keyframes voxsight-pulse {
+  0%, 100% {
+    outline-color: #FBBC04;
+  }
+  50% {
+    outline-color: #F9AB00;
+    box-shadow: 0 0 8px rgba(251, 188, 4, 0.5);
+  }
+}
+
+@keyframes voxsight-cursor-pulse {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "voxsight",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs && echo 'Watching...' && npx nodemon --watch src -e ts,html,css --exec 'node build.mjs'"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.36",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.1"
+  }
+}

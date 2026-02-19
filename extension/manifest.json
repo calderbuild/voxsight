@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "VoxSight",
+  "version": "0.1.0",
+  "description": "Voice-driven visual web navigator powered by Gemini AI",
+  "permissions": [
+    "activeTab",
+    "sidePanel",
+    "tabs",
+    "scripting",
+    "storage"
+  ],
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/index.ts"],
+      "css": ["src/content/highlight.css"]
+    }
+  ],
+  "action": {
+    "default_title": "Open VoxSight",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+V"
+      },
+      "description": "Toggle VoxSight"
+    },
+    "describe-page": {
+      "suggested_key": {
+        "default": "Alt+D"
+      },
+      "description": "Describe current page"
+    }
+  }
+}
