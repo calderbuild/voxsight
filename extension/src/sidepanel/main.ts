@@ -1,9 +1,13 @@
 import type {
+  ActionResultMessage,
   AgentAction,
   AgentResponseMessage,
   CaptureScreenshotResponse,
-  ErrorMessage,
   ConnectedMessage,
+  ErrorMessage,
+  ExecuteActionResponse,
+  LanguageMode,
+  ScreenshotMessage,
   UserCommandMessage,
   WSMessage,
 } from '../shared/types';
@@ -18,12 +22,33 @@ const voiceBtnLabel = voiceBtn.querySelector('.voice-btn__label') as HTMLSpanEle
 const textInput = document.getElementById('textInput') as HTMLInputElement;
 const describeBtn = document.getElementById('describeBtn') as HTMLButtonElement;
 const readBtn = document.getElementById('readBtn') as HTMLButtonElement;
+const languageSelect = document.getElementById('languageSelect') as HTMLSelectElement;
+const confirmPanel = document.getElementById('confirmPanel') as HTMLElement;
+const confirmText = document.getElementById('confirmText') as HTMLElement;
+const confirmYesBtn = document.getElementById('confirmYesBtn') as HTMLButtonElement;
+const confirmNoBtn = document.getElementById('confirmNoBtn') as HTMLButtonElement;
 
 // State
 let ws: WebSocket | null = null;
 let isListening = false;
 let recognition: SpeechRecognition | null = null;
 let synthesis = window.speechSynthesis;
+let languageMode: LanguageMode = 'auto';
+let backendTimeoutId: number | null = null;
+let waitingForConnectionRecovery = false;
+
+interface PendingConfirmation {
+  action: AgentAction;
+  resolve: (approved: boolean) => void;
+}
+
+let pendingConfirmation: PendingConfirmation | null = null;
+
+interface SidePanelSettings {
+  languageMode: LanguageMode;
+}
+
+const BACKEND_TIMEOUT_MS = 10_000;
 const NON_SCRIPTABLE_URL_PREFIXES = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'devtools://', 'view-source:'];
 const NON_SCRIPTABLE_HOSTS = new Set(['chrome.google.com', 'chromewebstore.google.com']);
 
@@ -36,21 +61,24 @@ async function connectWebSocket(): Promise<void> {
   } catch (err) {
     console.error('[VoxSight] Failed to create auth token:', err);
     addStatusMessage('Connection setup failed. Retrying...');
-    setTimeout(() => {
-      void connectWebSocket();
-    }, 3000);
+    setTimeout(() => void connectWebSocket(), 3000);
     return;
   }
 
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
-    addStatusMessage('Connected to VoxSight backend');
+    if (waitingForConnectionRecovery) {
+      addStatusMessage('Connection restored.');
+      waitingForConnectionRecovery = false;
+    } else {
+      addStatusMessage('Connected to VoxSight backend.');
+    }
   };
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data) as WSMessage;
-    handleServerMessage(msg);
+    void handleServerMessage(msg);
   };
 
   ws.onerror = () => {
@@ -58,40 +86,61 @@ async function connectWebSocket(): Promise<void> {
   };
 
   ws.onclose = () => {
-    addStatusMessage('Disconnected. Reconnecting...');
-    setTimeout(() => {
-      void connectWebSocket();
-    }, 3000);
+    waitingForConnectionRecovery = true;
+    addStatusMessage('Connection lost. Reconnecting...');
+    setTimeout(() => void connectWebSocket(), 3000);
   };
 }
 
-function sendMessage(msg: WSMessage): void {
+function sendMessage(msg: WSMessage): boolean {
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
+    return true;
+  }
+
+  addErrorMessage('Backend is not connected yet. Please wait and retry.');
+  return false;
+}
+
+function startBackendTimeout(label: string): void {
+  clearBackendTimeout();
+  backendTimeoutId = window.setTimeout(() => {
+    addErrorMessage(`Backend timeout during ${label}. Please retry.`);
+    clearProcessingState();
+  }, BACKEND_TIMEOUT_MS);
+}
+
+function clearBackendTimeout(): void {
+  if (backendTimeoutId !== null) {
+    window.clearTimeout(backendTimeoutId);
+    backendTimeoutId = null;
   }
 }
 
-function handleServerMessage(msg: WSMessage): void {
+async function handleServerMessage(msg: WSMessage): Promise<void> {
   switch (msg.type) {
     case 'connected':
       addStatusMessage(`Session: ${(msg as ConnectedMessage).sessionId}`);
-      break;
+      return;
 
     case 'agent_response': {
+      clearBackendTimeout();
       const response = msg as AgentResponseMessage;
+      pageDescription.textContent = response.text;
       addAgentMessage(response.text);
       speak(response.text);
-
-      // Forward actions to content script
-      for (const action of response.actions) {
-        executeAction(action);
+      await processAgentActions(response.actions);
+      if (response.actions.length === 0) {
+        clearProcessingState();
       }
-      break;
+      return;
     }
 
     case 'error':
+      clearBackendTimeout();
       addErrorMessage((msg as ErrorMessage).message);
-      break;
+      clearProcessingState();
+      return;
   }
 }
 
@@ -107,22 +156,27 @@ function initSpeechRecognition(): void {
   recognition = new SpeechRecognition();
   recognition.continuous = false;
   recognition.interimResults = false;
-  recognition.lang = 'zh-CN';
+  applyRecognitionLanguage();
 
   recognition.onresult = (event) => {
     const result = event.results[0];
-    if (result.isFinal) {
-      const text = result[0].transcript;
-      const confidence = result[0].confidence;
+    if (!result.isFinal) return;
 
-      if (confidence < 0.5) {
-        addAgentMessage('Sorry, I did not catch that. Please try again.');
-        speak('Sorry, I did not catch that. Please try again.');
-        return;
-      }
+    const text = result[0].transcript;
+    const confidence = result[0].confidence;
 
-      handleUserInput(text);
+    if (pendingConfirmation) {
+      handleConfirmationSpeech(text);
+      return;
     }
+
+    if (confidence < 0.5) {
+      addAgentMessage('Sorry, I did not catch that. Please try again.');
+      speak('Sorry, I did not catch that. Please try again.');
+      return;
+    }
+
+    void handleUserInput(text);
   };
 
   recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -150,8 +204,14 @@ function stopListening(): void {
   if (!recognition) return;
   isListening = false;
   voiceBtn.classList.remove('voice-btn--listening');
-  voiceBtnLabel.textContent = 'Hold to speak';
-  try { recognition.stop(); } catch {}
+  if (!voiceBtn.classList.contains('voice-btn--processing')) {
+    voiceBtnLabel.textContent = 'Hold to speak';
+  }
+  try {
+    recognition.stop();
+  } catch {
+    // no-op
+  }
 }
 
 function showTextInput(): void {
@@ -159,12 +219,31 @@ function showTextInput(): void {
   voiceBtn.style.display = 'none';
 }
 
+function applyRecognitionLanguage(): void {
+  if (!recognition) return;
+  if (languageMode === 'zh') {
+    recognition.lang = 'zh-CN';
+    return;
+  }
+  if (languageMode === 'en') {
+    recognition.lang = 'en-US';
+    return;
+  }
+  recognition.lang = navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en-US';
+}
+
 // --- Voice Output ---
+
+function detectSpeechLang(text: string): string {
+  if (languageMode === 'zh') return 'zh-CN';
+  if (languageMode === 'en') return 'en-US';
+  return /[\u4e00-\u9fff]/.test(text) ? 'zh-CN' : 'en-US';
+}
 
 function speak(text: string): void {
   synthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = 'zh-CN';
+  utterance.lang = detectSpeechLang(text);
   utterance.rate = 1.0;
   synthesis.speak(utterance);
 }
@@ -174,62 +253,201 @@ function speak(text: string): void {
 async function handleUserInput(text: string): Promise<void> {
   addUserMessage(text);
 
-  // Capture screenshot first
-  const screenshot = await captureScreenshot();
+  const screenshot = await captureCurrentScreenshotMessage();
   if (!screenshot) {
-    addErrorMessage('Failed to capture screenshot. Make sure you are on a regular webpage (not chrome:// or about: pages).');
-    voiceBtn.classList.remove('voice-btn--processing');
-    voiceBtnLabel.textContent = 'Hold to speak';
+    addErrorMessage('Failed to capture screenshot. Use a regular webpage (http/https), not chrome:// pages.');
+    clearProcessingState();
     return;
   }
 
-  const tab = await getCurrentTab();
   const msg: UserCommandMessage = {
     type: 'user_command',
     text,
-    screenshot: {
-      type: 'screenshot',
-      image: screenshot.image,
-      devicePixelRatio: screenshot.devicePixelRatio,
-      viewportWidth: screenshot.viewportWidth,
-      viewportHeight: screenshot.viewportHeight,
-      url: tab?.url || '',
-      title: tab?.title || '',
-    },
+    languageMode,
+    screenshot,
   };
 
-  sendMessage(msg);
-  voiceBtn.classList.add('voice-btn--processing');
-  voiceBtnLabel.textContent = 'Analyzing...';
+  if (!sendMessage(msg)) {
+    return;
+  }
+
+  setProcessingState('Analyzing...');
+  startBackendTimeout('analysis');
+}
+
+async function processAgentActions(actions: AgentAction[]): Promise<void> {
+  if (actions.length === 0) return;
+
+  const results: ExecuteActionResponse[] = [];
+  let lastAction: AgentAction | undefined;
+
+  for (const action of actions) {
+    lastAction = action;
+    const shouldRun = await requestActionConfirmationIfNeeded(action);
+    if (!shouldRun) {
+      const cancelMessage = languageMode === 'zh' ? '用户取消了该操作。' : 'User cancelled this action.';
+      results.push({ success: false, description: cancelMessage });
+      break;
+    }
+
+    const result = await executeAction(action);
+    results.push(result);
+    if (!result.success) {
+      break;
+    }
+  }
+
+  if (!lastAction || results.length === 0) {
+    clearProcessingState();
+    return;
+  }
+
+  await delay(500);
+
+  const screenshot = await captureCurrentScreenshotMessage();
+  const actionSummary = results.map((result) => result.description).join(' | ');
+  const finalResult: ActionResultMessage = {
+    type: 'action_result',
+    success: results.every((result) => result.success),
+    description: screenshot ? actionSummary : `${actionSummary} | Follow-up screenshot unavailable.`,
+    action: lastAction,
+    languageMode,
+    screenshot: screenshot || undefined,
+  };
+
+  if (sendMessage(finalResult)) {
+    setProcessingState('Verifying...');
+    startBackendTimeout('action verification');
+  } else {
+    clearProcessingState();
+  }
+}
+
+async function executeAction(action: AgentAction): Promise<ExecuteActionResponse> {
+  const tab = await findWebTab();
+  if (!tab?.id) {
+    return { success: false, description: 'No scriptable tab available for action execution.' };
+  }
+
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tab.id, { action: 'executeAction', agentAction: action }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({
+          success: false,
+          description: `Action failed: ${chrome.runtime.lastError.message}`,
+        });
+        return;
+      }
+      if (!response) {
+        resolve({ success: false, description: 'Action failed: no response from content script.' });
+        return;
+      }
+      resolve(response as ExecuteActionResponse);
+    });
+  });
+}
+
+async function requestActionConfirmationIfNeeded(action: AgentAction): Promise<boolean> {
+  const prompt = buildConfirmationPrompt(action);
+  if (!prompt) {
+    return true;
+  }
+
+  return new Promise<boolean>((resolve) => {
+    pendingConfirmation = { action, resolve };
+    confirmText.textContent = prompt;
+    confirmPanel.hidden = false;
+    speak(prompt);
+    addStatusMessage(prompt);
+  });
+}
+
+function buildConfirmationPrompt(action: AgentAction): string | null {
+  if (typeof action.confirmPrompt === 'string' && action.confirmPrompt.trim()) {
+    return action.confirmPrompt;
+  }
+
+  const riskyText = JSON.stringify(action).toLowerCase();
+  const isRisky = action.confirm === true || /(delete|remove|submit|pay|purchase|checkout|transfer|send|confirm order)/.test(riskyText);
+  if (!isRisky) {
+    return null;
+  }
+
+  const actionText = describeAction(action);
+  return languageMode === 'zh'
+    ? `这是高风险操作：${actionText}。是否继续？`
+    : `This is a high-risk action: ${actionText}. Do you want to continue?`;
+}
+
+function describeAction(action: AgentAction): string {
+  switch (action.type) {
+    case 'click':
+      return `click "${action.description || 'target'}"`;
+    case 'type_text':
+      return `type "${action.text}"`;
+    case 'navigate':
+      return `navigate to ${action.url}`;
+    case 'scroll':
+      return `scroll ${action.direction}`;
+    case 'press_key':
+      return `press ${action.key}`;
+    default:
+      return action.type;
+  }
+}
+
+function resolveConfirmation(approved: boolean): void {
+  if (!pendingConfirmation) return;
+  const { resolve } = pendingConfirmation;
+  pendingConfirmation = null;
+  confirmPanel.hidden = true;
+  resolve(approved);
+}
+
+function handleConfirmationSpeech(text: string): void {
+  const normalized = text.trim().toLowerCase();
+  const yes = /\b(yes|confirm|ok|okay|sure|proceed|go ahead)\b/.test(normalized) || /^(是|确认|可以|继续|好的)$/.test(text.trim());
+  const no = /\b(no|cancel|stop|don't|do not)\b/.test(normalized) || /^(不|取消|不要|停止)$/.test(text.trim());
+
+  if (yes) {
+    addUserMessage(text);
+    resolveConfirmation(true);
+    return;
+  }
+  if (no) {
+    addUserMessage(text);
+    resolveConfirmation(false);
+    return;
+  }
+
+  const retryText = languageMode === 'zh' ? '请回答“确认”或“取消”。' : 'Please say yes/confirm or no/cancel.';
+  addStatusMessage(retryText);
+  speak(retryText);
 }
 
 async function findWebTab(): Promise<chrome.tabs.Tab | undefined> {
-  // Get all tabs in current window, then pick one we can script against.
   const tabs = await chrome.tabs.query({ currentWindow: true });
-  // Prefer the active, scriptable tab.
-  const activeTab = tabs.find((t) => t.active && isScriptableUrl(t.url));
+  const activeTab = tabs.find((tab) => tab.active && isScriptableUrl(tab.url));
   if (activeTab) return activeTab;
-  // Otherwise find any scriptable tab (most recently accessed first).
-  return tabs.find((t) => isScriptableUrl(t.url));
+  return tabs.find((tab) => isScriptableUrl(tab.url));
 }
 
-async function captureScreenshot(): Promise<CaptureScreenshotResponse | null> {
-  const tab = await findWebTab();
-  if (!tab?.id) {
-    addStatusMessage('No scriptable webpage found. Open a regular http(s) page (not chrome:// or Chrome Web Store).');
-    return null;
+async function captureScreenshot(tabId?: number): Promise<CaptureScreenshotResponse | null> {
+  let targetTabId = tabId;
+  if (!targetTabId) {
+    const tab = await findWebTab();
+    targetTabId = tab?.id;
   }
+  if (!targetTabId) return null;
+
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: 'captureScreenshot', tabId: tab!.id }, (response) => {
+    chrome.runtime.sendMessage({ action: 'captureScreenshot', tabId: targetTabId }, (response) => {
       if (chrome.runtime.lastError) {
-        console.error('[VoxSight] sendMessage error:', chrome.runtime.lastError.message);
-        addStatusMessage(`Debug: ${chrome.runtime.lastError.message}`);
+        console.error('[VoxSight] captureScreenshot error:', chrome.runtime.lastError.message);
         resolve(null);
         return;
       }
       if (!response) {
-        console.error('[VoxSight] captureScreenshot returned null');
-        addStatusMessage('Debug: background returned null');
         resolve(null);
         return;
       }
@@ -238,22 +456,60 @@ async function captureScreenshot(): Promise<CaptureScreenshotResponse | null> {
   });
 }
 
-async function getCurrentTab(): Promise<chrome.tabs.Tab | undefined> {
-  return findWebTab();
+async function captureCurrentScreenshotMessage(): Promise<ScreenshotMessage | null> {
+  const tab = await findWebTab();
+  if (!tab?.id) {
+    addStatusMessage('No scriptable webpage found. Open a regular http(s) page.');
+    return null;
+  }
+
+  const screenshot = await captureScreenshot(tab.id);
+  if (!screenshot) {
+    return null;
+  }
+
+  return {
+    type: 'screenshot',
+    image: screenshot.image,
+    devicePixelRatio: screenshot.devicePixelRatio,
+    viewportWidth: screenshot.viewportWidth,
+    viewportHeight: screenshot.viewportHeight,
+    url: tab.url || '',
+    title: tab.title || '',
+  };
 }
 
-async function executeAction(action: AgentAction): Promise<void> {
-  const tab = await findWebTab();
-  if (!tab?.id) return;
+function isScriptableUrl(url?: string): boolean {
+  if (!url) return false;
+  if (NON_SCRIPTABLE_URL_PREFIXES.some((prefix) => url.startsWith(prefix))) {
+    return false;
+  }
 
-  chrome.tabs.sendMessage(tab.id, { action: 'executeAction', agentAction: action });
-
-  // Reset button state
-  voiceBtn.classList.remove('voice-btn--processing');
-  voiceBtnLabel.textContent = 'Hold to speak';
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) {
+      return false;
+    }
+    if (NON_SCRIPTABLE_HOSTS.has(parsed.hostname)) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // --- UI Helpers ---
+
+function setProcessingState(label: string): void {
+  voiceBtn.classList.add('voice-btn--processing');
+  voiceBtnLabel.textContent = label;
+}
+
+function clearProcessingState(): void {
+  voiceBtn.classList.remove('voice-btn--processing');
+  voiceBtnLabel.textContent = 'Hold to speak';
+}
 
 function addUserMessage(text: string): void {
   const div = document.createElement('div');
@@ -287,80 +543,85 @@ function addStatusMessage(text: string): void {
   conversation.scrollTop = conversation.scrollHeight;
 }
 
-function isScriptableUrl(url?: string): boolean {
-  if (!url) return false;
-  if (NON_SCRIPTABLE_URL_PREFIXES.some((prefix) => url.startsWith(prefix))) {
-    return false;
-  }
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  try {
-    const parsed = new URL(url);
-    if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) {
-      return false;
-    }
-    if (NON_SCRIPTABLE_HOSTS.has(parsed.hostname)) {
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
+// --- Settings ---
+
+async function loadSettings(): Promise<void> {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.settings);
+  const settings = (result[STORAGE_KEYS.settings] || {}) as Partial<SidePanelSettings>;
+  languageMode = settings.languageMode === 'zh' || settings.languageMode === 'en' || settings.languageMode === 'auto'
+    ? settings.languageMode
+    : 'auto';
+  languageSelect.value = languageMode;
+}
+
+function persistSettings(): void {
+  const settings: SidePanelSettings = { languageMode };
+  chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings });
 }
 
 // --- Event Listeners ---
 
-// Push-to-talk: hold to speak
 voiceBtn.addEventListener('mousedown', () => startListening());
 voiceBtn.addEventListener('mouseup', () => stopListening());
 voiceBtn.addEventListener('mouseleave', () => {
   if (isListening) stopListening();
 });
 
-// Keyboard: Space to speak (when side panel focused)
-document.addEventListener('keydown', (e) => {
-  if (e.code === 'Space' && document.activeElement === document.body) {
-    e.preventDefault();
+document.addEventListener('keydown', (event) => {
+  if (event.code === 'Space' && document.activeElement === document.body) {
+    event.preventDefault();
     if (!isListening) startListening();
   }
 });
-document.addEventListener('keyup', (e) => {
-  if (e.code === 'Space' && isListening) {
-    e.preventDefault();
+
+document.addEventListener('keyup', (event) => {
+  if (event.code === 'Space' && isListening) {
+    event.preventDefault();
     stopListening();
   }
 });
 
-// Text input fallback
-textInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && textInput.value.trim()) {
-    handleUserInput(textInput.value.trim());
+textInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && textInput.value.trim()) {
+    const value = textInput.value.trim();
     textInput.value = '';
+    void handleUserInput(value);
   }
 });
 
-// Quick actions
-describeBtn.addEventListener('click', () => {
-  handleUserInput('Describe this page');
-});
+describeBtn.addEventListener('click', () => void handleUserInput('Describe this page'));
+readBtn.addEventListener('click', () => void handleUserInput('Read the main content'));
 
-readBtn.addEventListener('click', () => {
-  handleUserInput('Read the main content');
+confirmYesBtn.addEventListener('click', () => resolveConfirmation(true));
+confirmNoBtn.addEventListener('click', () => resolveConfirmation(false));
+
+languageSelect.addEventListener('change', () => {
+  const selected = languageSelect.value;
+  languageMode = selected === 'zh' || selected === 'en' || selected === 'auto' ? selected : 'auto';
+  applyRecognitionLanguage();
+  persistSettings();
+  const msg = languageMode === 'zh' ? '语言已切换为中文。' : languageMode === 'en' ? 'Language switched to English.' : 'Language switched to auto.';
+  addStatusMessage(msg);
 });
 
 // --- Init ---
 
-function init(): void {
+async function init(): Promise<void> {
+  await loadSettings();
   initSpeechRecognition();
   void connectWebSocket();
 
-  // Check onboarding
-  chrome.storage.local.get(STORAGE_KEYS.onboardingComplete, (result) => {
-    if (!result[STORAGE_KEYS.onboardingComplete]) {
-      addAgentMessage('Welcome to VoxSight! Hold the microphone button or press Space to give a voice command. Press Alt+D to hear a page description.');
-      speak('Welcome to VoxSight. Hold Space to speak, or press Alt D to describe the current page.');
-      chrome.storage.local.set({ [STORAGE_KEYS.onboardingComplete]: true });
-    }
-  });
+  const result = await chrome.storage.local.get(STORAGE_KEYS.onboardingComplete);
+  if (!result[STORAGE_KEYS.onboardingComplete]) {
+    const text = 'Welcome to VoxSight! Hold the microphone button or press Space to give a voice command.';
+    addAgentMessage(text);
+    speak(text);
+    chrome.storage.local.set({ [STORAGE_KEYS.onboardingComplete]: true });
+  }
 }
 
-init();
+void init();

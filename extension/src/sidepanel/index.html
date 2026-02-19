@@ -10,11 +10,14 @@
   <div id="app">
     <header class="header">
       <h1 class="header__title">VoxSight</h1>
-      <button id="settingsBtn" class="header__settings" aria-label="Settings" title="Settings">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-          <path d="M10 13a3 3 0 100-6 3 3 0 000 6zm7.5-3c0 .34-.03.67-.08 1l2.17 1.7a.5.5 0 01.12.64l-2.06 3.56a.5.5 0 01-.61.22l-2.56-1.03a7.5 7.5 0 01-1.73 1l-.39 2.72a.5.5 0 01-.5.42H7.14a.5.5 0 01-.5-.42l-.39-2.72a7.5 7.5 0 01-1.73-1L2.96 16.12a.5.5 0 01-.61-.22L.29 12.34a.5.5 0 01.12-.64L2.58 11A7.7 7.7 0 012.5 10c0-.34.03-.67.08-1L.41 7.3a.5.5 0 01-.12-.64L2.35 3.1a.5.5 0 01.61-.22l2.56 1.03a7.5 7.5 0 011.73-1l.39-2.72A.5.5 0 018.14.77h4.12c.24 0 .45.17.5.42l.39 2.72a7.5 7.5 0 011.73 1l2.56-1.03a.5.5 0 01.61.22l2.06 3.56a.5.5 0 01-.12.64L17.82 9c.05.33.08.66.08 1z"/>
-        </svg>
-      </button>
+      <label class="language-picker" for="languageSelect">
+        <span class="language-picker__label">Lang</span>
+        <select id="languageSelect" class="language-picker__select" aria-label="Language mode">
+          <option value="auto">Auto</option>
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </label>
     </header>
 
     <section id="pageDescription" class="page-description" aria-live="polite" role="status">
@@ -22,6 +25,14 @@
     </section>
 
     <section id="conversation" class="conversation" role="log" aria-label="Conversation history">
+    </section>
+
+    <section id="confirmPanel" class="confirm-panel" hidden>
+      <p id="confirmText" class="confirm-panel__text">Please confirm this action.</p>
+      <div class="confirm-panel__actions">
+        <button id="confirmYesBtn" class="confirm-btn confirm-btn--yes" aria-label="Confirm action">Confirm</button>
+        <button id="confirmNoBtn" class="confirm-btn confirm-btn--no" aria-label="Cancel action">Cancel</button>
+      </div>
     </section>
 
     <footer class="controls">

@@ -12,26 +12,32 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 async function executeAction(action: AgentAction): Promise<ExecuteActionResponse> {
-  switch (action.type) {
-    case 'click':
-      return executeClick(action.x, action.y, action.description);
-    case 'type_text':
-      return executeTypeText(action.x, action.y, action.text);
-    case 'scroll':
-      return executeScroll(action.direction, action.amount);
-    case 'navigate':
-      return executeNavigate(action.url);
-    case 'hover':
-      return executeHover(action.x, action.y);
-    case 'press_key':
-      return executePressKey(action.key);
-    case 'describe_page':
-    case 'find_element':
-    case 'read_content':
-      // These are handled by the backend/Gemini, not the content script
-      return { success: true, description: 'Handled by AI agent' };
-    default:
-      return { success: false, description: `Unknown action: ${(action as AgentAction).type}` };
+  try {
+    switch (action.type) {
+      case 'click':
+        return executeClick(action.x, action.y, action.description);
+      case 'type_text':
+        return executeTypeText(action.x, action.y, action.text);
+      case 'scroll':
+        return executeScroll(action.direction, action.amount);
+      case 'navigate':
+        return executeNavigate(action.url);
+      case 'hover':
+        return executeHover(action.x, action.y);
+      case 'press_key':
+        return executePressKey(action.key);
+      case 'describe_page':
+      case 'find_element':
+      case 'read_content':
+        return { success: true, description: 'Handled by AI agent' };
+      default:
+        return { success: false, description: `Unknown action: ${(action as AgentAction).type}` };
+    }
+  } catch (err) {
+    return {
+      success: false,
+      description: `Action execution error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+    };
   }
 }
 
@@ -43,26 +49,27 @@ function executeClick(imgX: number, imgY: number, description: string): ExecuteA
   // Highlight before clicking
   highlightPosition(cssX, cssY, description);
 
-  // Find element at coordinates
+  if (cssX < 0 || cssY < 0 || cssX > window.innerWidth || cssY > window.innerHeight) {
+    removeHighlight();
+    return { success: false, description: `Click target (${Math.round(cssX)}, ${Math.round(cssY)}) is outside the viewport.` };
+  }
+
   const element = document.elementFromPoint(cssX, cssY);
 
   if (element && element instanceof HTMLElement) {
+    if (element.getAttribute('aria-disabled') === 'true' || (element as HTMLButtonElement).disabled) {
+      removeHighlight();
+      return { success: false, description: `Target element is disabled: ${description || element.tagName.toLowerCase()}` };
+    }
+
     element.focus();
     element.click();
     removeHighlight();
     return { success: true, description: `Clicked: ${description}` };
   }
 
-  // Fallback: dispatch mouse events at coordinates
-  const clickEvent = new MouseEvent('click', {
-    clientX: cssX,
-    clientY: cssY,
-    bubbles: true,
-    cancelable: true,
-  });
-  document.elementFromPoint(cssX, cssY)?.dispatchEvent(clickEvent);
   removeHighlight();
-  return { success: true, description: `Clicked at (${Math.round(cssX)}, ${Math.round(cssY)})` };
+  return { success: false, description: `No clickable element at (${Math.round(cssX)}, ${Math.round(cssY)}).` };
 }
 
 function executeTypeText(imgX: number, imgY: number, text: string): ExecuteActionResponse {
@@ -120,6 +127,8 @@ function executeScroll(direction: string, amount: number): ExecuteActionResponse
     case 'right':
       window.scrollBy({ left: pixels, behavior: 'smooth' });
       break;
+    default:
+      return { success: false, description: `Unsupported scroll direction: ${direction}` };
   }
   return { success: true, description: `Scrolled ${direction} ${pixels}px` };
 }
@@ -138,9 +147,9 @@ function executeHover(imgX: number, imgY: number): ExecuteActionResponse {
   if (element) {
     element.dispatchEvent(new MouseEvent('mouseenter', { clientX: cssX, clientY: cssY, bubbles: true }));
     element.dispatchEvent(new MouseEvent('mouseover', { clientX: cssX, clientY: cssY, bubbles: true }));
-    return { success: true, description: 'Hovered' };
+    return { success: true, description: `Hovered over ${(element as HTMLElement).tagName.toLowerCase()}` };
   }
-  return { success: false, description: 'No element at coordinates' };
+  return { success: false, description: `No element at (${Math.round(cssX)}, ${Math.round(cssY)})` };
 }
 
 function executePressKey(key: string): ExecuteActionResponse {

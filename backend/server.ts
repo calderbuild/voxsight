@@ -10,7 +10,7 @@ if (proxyUrl) {
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
-import { handleUserCommand } from './agent.js';
+import { handleAgentTurn, type ConversationTurn } from './agent.js';
 import { verifyWebSocketAuth } from './auth.js';
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
@@ -26,9 +26,51 @@ const wss = new WebSocketServer({ server: httpServer });
 interface ClientSession {
   id: string;
   ws: WebSocket;
+  conversationHistory: ConversationTurn[];
+  languageMode: 'zh' | 'en' | 'auto';
 }
 
 const sessions = new Map<string, ClientSession>();
+
+function normalizeLanguageMode(value: unknown): 'zh' | 'en' | 'auto' {
+  if (value === 'zh' || value === 'en' || value === 'auto') {
+    return value;
+  }
+  return 'auto';
+}
+
+function pushConversationTurn(
+  history: ConversationTurn[],
+  userText: string,
+  assistantText: string,
+): ConversationTurn[] {
+  const next = [...history, { userText, assistantText }];
+  if (next.length <= 10) {
+    return next;
+  }
+  return [next[0], ...next.slice(-8)];
+}
+
+function summarizeAction(action: unknown): string {
+  if (!action || typeof action !== 'object') {
+    return 'unknown action';
+  }
+  const typedAction = action as Record<string, unknown>;
+  const type = typeof typedAction.type === 'string' ? typedAction.type : 'unknown';
+  if (type === 'click') {
+    const description = typeof typedAction.description === 'string' ? typedAction.description : 'target';
+    return `click (${description})`;
+  }
+  if (type === 'type_text') {
+    const target = typeof typedAction.targetDescription === 'string' ? typedAction.targetDescription : 'input';
+    return `type_text (${target})`;
+  }
+  if (type === 'navigate') {
+    const url = typeof typedAction.url === 'string' ? typedAction.url : '';
+    return `navigate (${url})`;
+  }
+  return type;
+}
 
 wss.on('connection', (ws: WebSocket, req) => {
   const auth = verifyWebSocketAuth(req.url);
@@ -39,7 +81,12 @@ wss.on('connection', (ws: WebSocket, req) => {
   }
 
   const sessionId = randomUUID();
-  const session: ClientSession = { id: sessionId, ws };
+  const session: ClientSession = {
+    id: sessionId,
+    ws,
+    conversationHistory: [],
+    languageMode: 'auto',
+  };
   sessions.set(sessionId, session);
 
   console.log(`Client connected: ${sessionId}`);
@@ -52,15 +99,50 @@ wss.on('connection', (ws: WebSocket, req) => {
       const msg = JSON.parse(data.toString());
 
       if (msg.type === 'user_command') {
-        const response = await handleUserCommand(
-          msg.text,
-          msg.screenshot.image,
-          msg.screenshot.devicePixelRatio,
-          msg.screenshot.viewportWidth,
-          msg.screenshot.viewportHeight,
-          msg.screenshot.url,
-        );
+        session.languageMode = normalizeLanguageMode(msg.languageMode);
+        const response = await handleAgentTurn({
+          inputType: 'user_command',
+          userText: typeof msg.text === 'string' ? msg.text : '',
+          screenshotDataUrl: msg.screenshot?.image,
+          devicePixelRatio: Number(msg.screenshot?.devicePixelRatio) || 1,
+          viewportWidth: Number(msg.screenshot?.viewportWidth) || 1280,
+          viewportHeight: Number(msg.screenshot?.viewportHeight) || 720,
+          pageUrl: typeof msg.screenshot?.url === 'string' ? msg.screenshot.url : '',
+          conversationHistory: session.conversationHistory,
+          languageMode: session.languageMode,
+        });
+        session.conversationHistory = pushConversationTurn(session.conversationHistory, msg.text, response.text);
+        ws.send(JSON.stringify(response));
+        return;
+      }
 
+      if (msg.type === 'action_result') {
+        session.languageMode = normalizeLanguageMode(msg.languageMode ?? session.languageMode);
+        const actionDescription = summarizeAction(msg.action);
+        const actionOutcome = `Action result: ${msg.success ? 'success' : 'failed'}; ${msg.description}`;
+
+        const response = await handleAgentTurn({
+          inputType: 'action_result',
+          userText: actionOutcome,
+          screenshotDataUrl: msg.screenshot?.image,
+          devicePixelRatio: Number(msg.screenshot?.devicePixelRatio) || 1,
+          viewportWidth: Number(msg.screenshot?.viewportWidth) || 1280,
+          viewportHeight: Number(msg.screenshot?.viewportHeight) || 720,
+          pageUrl: typeof msg.screenshot?.url === 'string' ? msg.screenshot.url : '',
+          conversationHistory: session.conversationHistory,
+          languageMode: session.languageMode,
+          actionResult: {
+            success: Boolean(msg.success),
+            description: typeof msg.description === 'string' ? msg.description : 'No result description',
+            actionSummary: actionDescription,
+          },
+        });
+
+        session.conversationHistory = pushConversationTurn(
+          session.conversationHistory,
+          actionOutcome,
+          response.text,
+        );
         ws.send(JSON.stringify(response));
       }
     } catch (err) {

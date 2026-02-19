@@ -12,6 +12,13 @@ export type ActionType =
   | 'find_element'
   | 'read_content';
 
+export type LanguageMode = 'zh' | 'en' | 'auto';
+
+export interface ActionMeta {
+  confirm?: boolean;
+  confirmPrompt?: string;
+}
+
 export interface ClickAction {
   type: 'click';
   x: number;
@@ -72,7 +79,7 @@ export interface ReadContentAction {
   region: string;
 }
 
-export type AgentAction =
+export type AgentAction = (
   | ClickAction
   | TypeTextAction
   | ScrollAction
@@ -82,7 +89,8 @@ export type AgentAction =
   | PressKeyAction
   | DescribePageAction
   | FindElementAction
-  | ReadContentAction;
+  | ReadContentAction
+) & ActionMeta;
 
 // WebSocket message types (Extension <-> Backend)
 
@@ -100,6 +108,7 @@ export interface UserCommandMessage {
   type: 'user_command';
   text: string;
   screenshot: ScreenshotMessage;
+  languageMode?: LanguageMode;
 }
 
 export interface AgentResponseMessage {
@@ -112,6 +121,8 @@ export interface ActionResultMessage {
   type: 'action_result';
   success: boolean;
   description: string;
+  action?: AgentAction;
+  languageMode?: LanguageMode;
   screenshot?: ScreenshotMessage;
 }
 
