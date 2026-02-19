@@ -8,8 +8,11 @@
 </head>
 <body>
   <div id="app">
-    <header class="header">
-      <h1 class="header__title">VoxSight</h1>
+    <header class="header panel fade-in fade-in--1">
+      <div class="brand">
+        <p class="brand__eyebrow">Accessible AI Navigator</p>
+        <h1 class="header__title">VoxSight</h1>
+      </div>
       <label class="language-picker" for="languageSelect">
         <span class="language-picker__label">Lang</span>
         <select id="languageSelect" class="language-picker__select" aria-label="Language mode">
@@ -20,14 +23,18 @@
       </label>
     </header>
 
-    <section id="pageDescription" class="page-description" aria-live="polite" role="status">
+    <section id="pageDescription" class="page-description panel fade-in fade-in--2" aria-live="polite" role="status">
+      <div class="page-description__head">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span class="page-description__label">Live Summary</span>
+      </div>
       <p class="page-description__text">Press the microphone button or Space to start</p>
     </section>
 
-    <section id="conversation" class="conversation" role="log" aria-label="Conversation history">
+    <section id="conversation" class="conversation panel fade-in fade-in--3" role="log" aria-label="Conversation history">
     </section>
 
-    <section id="confirmPanel" class="confirm-panel" hidden>
+    <section id="confirmPanel" class="confirm-panel panel" hidden>
       <p id="confirmText" class="confirm-panel__text">Please confirm this action.</p>
       <div class="confirm-panel__actions">
         <button id="confirmYesBtn" class="confirm-btn confirm-btn--yes" aria-label="Confirm action">Confirm</button>
@@ -35,7 +42,7 @@
       </div>
     </section>
 
-    <footer class="controls">
+    <footer class="controls panel fade-in fade-in--4">
       <div class="voice-controls">
         <button id="voiceBtn" class="voice-btn" aria-label="Hold to speak" title="Hold Space or click to speak">
           <svg class="voice-btn__icon" width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
