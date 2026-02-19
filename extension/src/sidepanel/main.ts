@@ -16,6 +16,7 @@ import { createAuthenticatedWebSocketUrl } from '../shared/auth';
 
 // DOM elements
 const pageDescription = document.getElementById('pageDescription') as HTMLElement;
+const pageDescriptionText = pageDescription.querySelector('.page-description__text') as HTMLElement;
 const conversation = document.getElementById('conversation') as HTMLElement;
 const voiceBtn = document.getElementById('voiceBtn') as HTMLButtonElement;
 const voiceBtnLabel = voiceBtn.querySelector('.voice-btn__label') as HTMLSpanElement;
@@ -126,7 +127,7 @@ async function handleServerMessage(msg: WSMessage): Promise<void> {
     case 'agent_response': {
       clearBackendTimeout();
       const response = msg as AgentResponseMessage;
-      pageDescription.textContent = response.text;
+      pageDescriptionText.textContent = response.text;
       addAgentMessage(response.text);
       speak(response.text);
       await processAgentActions(response.actions);
@@ -240,11 +241,26 @@ function detectSpeechLang(text: string): string {
   return /[\u4e00-\u9fff]/.test(text) ? 'zh-CN' : 'en-US';
 }
 
+function getBestVoice(lang: string): SpeechSynthesisVoice | null {
+  const voices = synthesis.getVoices();
+  if (!voices.length) return null;
+  // Prefer enhanced/premium voices (e.g. macOS "Samantha (Enhanced)", Google voices)
+  const enhanced = voices.find(v => v.lang.startsWith(lang.slice(0, 2)) && /(enhanced|premium|google)/i.test(v.name));
+  if (enhanced) return enhanced;
+  // Fallback: exact lang match
+  const exact = voices.find(v => v.lang === lang);
+  if (exact) return exact;
+  // Fallback: language prefix match
+  return voices.find(v => v.lang.startsWith(lang.slice(0, 2))) ?? null;
+}
+
 function speak(text: string): void {
   synthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = detectSpeechLang(text);
   utterance.rate = 1.0;
+  const voice = getBestVoice(utterance.lang);
+  if (voice) utterance.voice = voice;
   synthesis.speak(utterance);
 }
 
@@ -589,6 +605,10 @@ textInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && textInput.value.trim()) {
     const value = textInput.value.trim();
     textInput.value = '';
+    if (pendingConfirmation) {
+      handleConfirmationSpeech(value);
+      return;
+    }
     void handleUserInput(value);
   }
 });
