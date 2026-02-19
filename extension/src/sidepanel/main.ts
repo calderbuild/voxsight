@@ -8,6 +8,7 @@ import type {
   WSMessage,
 } from '../shared/types';
 import { BACKEND_URL, STORAGE_KEYS } from '../shared/constants';
+import { createAuthenticatedWebSocketUrl } from '../shared/auth';
 
 // DOM elements
 const pageDescription = document.getElementById('pageDescription') as HTMLElement;
@@ -28,8 +29,20 @@ const NON_SCRIPTABLE_HOSTS = new Set(['chrome.google.com', 'chromewebstore.googl
 
 // --- WebSocket ---
 
-function connectWebSocket(): void {
-  ws = new WebSocket(BACKEND_URL);
+async function connectWebSocket(): Promise<void> {
+  let wsUrl = BACKEND_URL;
+  try {
+    wsUrl = await createAuthenticatedWebSocketUrl(BACKEND_URL);
+  } catch (err) {
+    console.error('[VoxSight] Failed to create auth token:', err);
+    addStatusMessage('Connection setup failed. Retrying...');
+    setTimeout(() => {
+      void connectWebSocket();
+    }, 3000);
+    return;
+  }
+
+  ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     addStatusMessage('Connected to VoxSight backend');
@@ -46,7 +59,9 @@ function connectWebSocket(): void {
 
   ws.onclose = () => {
     addStatusMessage('Disconnected. Reconnecting...');
-    setTimeout(connectWebSocket, 3000);
+    setTimeout(() => {
+      void connectWebSocket();
+    }, 3000);
   };
 }
 
@@ -336,7 +351,7 @@ readBtn.addEventListener('click', () => {
 
 function init(): void {
   initSpeechRecognition();
-  connectWebSocket();
+  void connectWebSocket();
 
   // Check onboarding
   chrome.storage.local.get(STORAGE_KEYS.onboardingComplete, (result) => {

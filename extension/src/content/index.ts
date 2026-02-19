@@ -1,4 +1,5 @@
 import type { AgentAction, ExecuteActionResponse } from '../shared/types';
+import { imageToCssPoint } from '../shared/coordinates';
 
 // Listen for action commands from side panel via background
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -35,9 +36,9 @@ async function executeAction(action: AgentAction): Promise<ExecuteActionResponse
 }
 
 function executeClick(imgX: number, imgY: number, description: string): ExecuteActionResponse {
-  const dpr = window.devicePixelRatio || 1;
-  const cssX = imgX / dpr;
-  const cssY = imgY / dpr;
+  const point = imageToCssPoint(imgX, imgY, window.devicePixelRatio || 1);
+  const cssX = point.x;
+  const cssY = point.y;
 
   // Highlight before clicking
   highlightPosition(cssX, cssY, description);
@@ -65,9 +66,9 @@ function executeClick(imgX: number, imgY: number, description: string): ExecuteA
 }
 
 function executeTypeText(imgX: number, imgY: number, text: string): ExecuteActionResponse {
-  const dpr = window.devicePixelRatio || 1;
-  const cssX = imgX / dpr;
-  const cssY = imgY / dpr;
+  const point = imageToCssPoint(imgX, imgY, window.devicePixelRatio || 1);
+  const cssX = point.x;
+  const cssY = point.y;
 
   const element = document.elementFromPoint(cssX, cssY);
 
@@ -129,9 +130,9 @@ function executeNavigate(url: string): ExecuteActionResponse {
 }
 
 function executeHover(imgX: number, imgY: number): ExecuteActionResponse {
-  const dpr = window.devicePixelRatio || 1;
-  const cssX = imgX / dpr;
-  const cssY = imgY / dpr;
+  const point = imageToCssPoint(imgX, imgY, window.devicePixelRatio || 1);
+  const cssX = point.x;
+  const cssY = point.y;
 
   const element = document.elementFromPoint(cssX, cssY);
   if (element) {

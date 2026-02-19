@@ -11,6 +11,7 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
 import { handleUserCommand } from './agent.js';
+import { verifyWebSocketAuth } from './auth.js';
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 
@@ -29,7 +30,14 @@ interface ClientSession {
 
 const sessions = new Map<string, ClientSession>();
 
-wss.on('connection', (ws: WebSocket) => {
+wss.on('connection', (ws: WebSocket, req) => {
+  const auth = verifyWebSocketAuth(req.url);
+  if (!auth.ok) {
+    console.warn('Rejected unauthenticated WebSocket connection:', auth.reason);
+    ws.close(1008, 'Unauthorized');
+    return;
+  }
+
   const sessionId = randomUUID();
   const session: ClientSession = { id: sessionId, ws };
   sessions.set(sessionId, session);
