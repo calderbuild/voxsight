@@ -11,7 +11,15 @@ chrome.action.onClicked.addListener(async (tab) => {
 // Handle messages from side panel and content scripts
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === 'captureScreenshot') {
-    captureScreenshot().then(sendResponse).catch(() => sendResponse(null));
+    captureScreenshot()
+      .then((result) => {
+        console.log('[VoxSight] Screenshot captured:', result ? 'OK' : 'null');
+        sendResponse(result);
+      })
+      .catch((err) => {
+        console.error('[VoxSight] Screenshot error:', err);
+        sendResponse(null);
+      });
     return true; // async response
   }
 });
@@ -61,7 +69,7 @@ async function captureScreenshot(): Promise<CaptureScreenshotResponse | null> {
       viewportHeight: info.viewportHeight,
     };
   } catch (err) {
-    console.error('Screenshot capture failed:', err);
+    console.error('[VoxSight] Screenshot capture failed:', err, 'message:', (err as Error).message);
     return null;
   }
 }

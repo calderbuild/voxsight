@@ -70,7 +70,7 @@ Viewport: ${viewportWidth}x${viewportHeight} (DPR: ${devicePixelRatio})
 Screenshot pixel dimensions: ${viewportWidth * devicePixelRatio}x${viewportHeight * devicePixelRatio}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-preview-05-20',
+      model: 'gemini-2.5-flash',
       contents: [
         {
           role: 'user',

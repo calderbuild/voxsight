@@ -160,7 +160,9 @@ async function handleUserInput(text: string): Promise<void> {
   // Capture screenshot first
   const screenshot = await captureScreenshot();
   if (!screenshot) {
-    addErrorMessage('Failed to capture screenshot');
+    addErrorMessage('Failed to capture screenshot. Make sure you are on a regular webpage (not chrome:// or about: pages).');
+    voiceBtn.classList.remove('voice-btn--processing');
+    voiceBtnLabel.textContent = 'Hold to speak';
     return;
   }
 
