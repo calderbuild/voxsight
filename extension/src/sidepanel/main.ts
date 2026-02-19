@@ -23,6 +23,8 @@ let ws: WebSocket | null = null;
 let isListening = false;
 let recognition: SpeechRecognition | null = null;
 let synthesis = window.speechSynthesis;
+const NON_SCRIPTABLE_URL_PREFIXES = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'devtools://', 'view-source:'];
+const NON_SCRIPTABLE_HOSTS = new Set(['chrome.google.com', 'chromewebstore.google.com']);
 
 // --- WebSocket ---
 
@@ -186,10 +188,33 @@ async function handleUserInput(text: string): Promise<void> {
   voiceBtnLabel.textContent = 'Analyzing...';
 }
 
+async function findWebTab(): Promise<chrome.tabs.Tab | undefined> {
+  // Get all tabs in current window, then pick one we can script against.
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  // Prefer the active, scriptable tab.
+  const activeTab = tabs.find((t) => t.active && isScriptableUrl(t.url));
+  if (activeTab) return activeTab;
+  // Otherwise find any scriptable tab (most recently accessed first).
+  return tabs.find((t) => isScriptableUrl(t.url));
+}
+
 async function captureScreenshot(): Promise<CaptureScreenshotResponse | null> {
+  const tab = await findWebTab();
+  if (!tab?.id) {
+    addStatusMessage('No scriptable webpage found. Open a regular http(s) page (not chrome:// or Chrome Web Store).');
+    return null;
+  }
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: 'captureScreenshot' }, (response) => {
-      if (chrome.runtime.lastError || !response) {
+    chrome.runtime.sendMessage({ action: 'captureScreenshot', tabId: tab!.id }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('[VoxSight] sendMessage error:', chrome.runtime.lastError.message);
+        addStatusMessage(`Debug: ${chrome.runtime.lastError.message}`);
+        resolve(null);
+        return;
+      }
+      if (!response) {
+        console.error('[VoxSight] captureScreenshot returned null');
+        addStatusMessage('Debug: background returned null');
         resolve(null);
         return;
       }
@@ -199,12 +224,11 @@ async function captureScreenshot(): Promise<CaptureScreenshotResponse | null> {
 }
 
 async function getCurrentTab(): Promise<chrome.tabs.Tab | undefined> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab;
+  return findWebTab();
 }
 
 async function executeAction(action: AgentAction): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await findWebTab();
   if (!tab?.id) return;
 
   chrome.tabs.sendMessage(tab.id, { action: 'executeAction', agentAction: action });
@@ -246,6 +270,26 @@ function addStatusMessage(text: string): void {
   div.textContent = text;
   conversation.appendChild(div);
   conversation.scrollTop = conversation.scrollHeight;
+}
+
+function isScriptableUrl(url?: string): boolean {
+  if (!url) return false;
+  if (NON_SCRIPTABLE_URL_PREFIXES.some((prefix) => url.startsWith(prefix))) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) {
+      return false;
+    }
+    if (NON_SCRIPTABLE_HOSTS.has(parsed.hostname)) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // --- Event Listeners ---
