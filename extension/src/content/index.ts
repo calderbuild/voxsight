@@ -41,6 +41,21 @@ async function executeAction(action: AgentAction): Promise<ExecuteActionResponse
   }
 }
 
+function findNearbyElement(x: number, y: number, maxOffset: number = 10): HTMLElement | null {
+  // Search in a spiral pattern around the target point
+  const offsets = [0, -5, 5, -10, 10];
+  for (const dx of offsets) {
+    for (const dy of offsets) {
+      if (dx === 0 && dy === 0) continue;
+      const el = document.elementFromPoint(x + dx, y + dy);
+      if (el && el instanceof HTMLElement && el !== document.documentElement && el !== document.body) {
+        return el;
+      }
+    }
+  }
+  return null;
+}
+
 function executeClick(imgX: number, imgY: number, description: string): ExecuteActionResponse {
   const point = imageToCssPoint(imgX, imgY, window.devicePixelRatio || 1);
   const cssX = point.x;
@@ -54,9 +69,20 @@ function executeClick(imgX: number, imgY: number, description: string): ExecuteA
     return { success: false, description: `Click target (${Math.round(cssX)}, ${Math.round(cssY)}) is outside the viewport.` };
   }
 
-  const element = document.elementFromPoint(cssX, cssY);
+  let element = document.elementFromPoint(cssX, cssY);
 
-  if (element && element instanceof HTMLElement) {
+  // If no element found at exact point, search nearby
+  if (!element || !(element instanceof HTMLElement) || element === document.documentElement || element === document.body) {
+    const nearby = findNearbyElement(cssX, cssY);
+    if (nearby) {
+      element = nearby;
+    } else {
+      removeHighlight();
+      return { success: false, description: `No clickable element at (${Math.round(cssX)}, ${Math.round(cssY)}) or nearby.` };
+    }
+  }
+
+  if (element instanceof HTMLElement) {
     if (element.getAttribute('aria-disabled') === 'true' || (element as HTMLButtonElement).disabled) {
       removeHighlight();
       return { success: false, description: `Target element is disabled: ${description || element.tagName.toLowerCase()}` };

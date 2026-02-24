@@ -42,7 +42,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --source ./backend \
   --region "$REGION" \
   --allow-unauthenticated \
-  --set-env-vars "GEMINI_API_KEY=$GEMINI_API_KEY" \
+  --set-env-vars "GEMINI_API_KEY=$GEMINI_API_KEY,USE_LIVE_API=true" \
   --memory 512Mi \
   --cpu 1 \
   --min-instances 0 \

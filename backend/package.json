@@ -9,8 +9,9 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@google/genai": "^1.0.0",
+    "@google/genai": "^1.42.0",
     "dotenv": "^17.3.1",
+    "global-agent": "^4.1.2",
     "undici": "^6.23.0",
     "ws": "^8.18.0"
   },

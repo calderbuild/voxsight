@@ -1,3 +1,14 @@
+FROM node:18-slim AS builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+COPY *.ts tsconfig.json ./
+RUN npx tsc
+
+# Production image
 FROM node:18-slim
 
 WORKDIR /app
@@ -5,10 +16,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --production
 
-COPY *.ts ./
-COPY tsconfig.json ./
-
-RUN npx tsc
+COPY --from=builder /app/dist ./dist
 
 ENV PORT=8080
 EXPOSE 8080

@@ -8,6 +8,8 @@ import type {
   ExecuteActionResponse,
   LanguageMode,
   ScreenshotMessage,
+  ToolCallMessage,
+  ToolResponseMessage,
   UserCommandMessage,
   WSMessage,
 } from '../shared/types';
@@ -39,6 +41,7 @@ let synthesis = window.speechSynthesis;
 let languageMode: LanguageMode = 'auto';
 let backendTimeoutId: number | null = null;
 let waitingForConnectionRecovery = false;
+let sessionMode: 'live' | 'legacy' = 'legacy';
 
 interface PendingConfirmation {
   action: AgentAction;
@@ -55,7 +58,7 @@ interface SidePanelSettings {
   fontSizeMode: FontSizeMode;
 }
 
-const BACKEND_TIMEOUT_MS = 10_000;
+const BACKEND_TIMEOUT_MS = 30_000; // 30s for Live API streaming
 const NON_SCRIPTABLE_URL_PREFIXES = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'devtools://', 'view-source:'];
 const NON_SCRIPTABLE_HOSTS = new Set(['chrome.google.com', 'chromewebstore.google.com']);
 
@@ -126,9 +129,12 @@ function clearBackendTimeout(): void {
 
 async function handleServerMessage(msg: WSMessage): Promise<void> {
   switch (msg.type) {
-    case 'connected':
-      addStatusMessage(`Session: ${(msg as ConnectedMessage).sessionId}`);
+    case 'connected': {
+      const connMsg = msg as ConnectedMessage;
+      sessionMode = connMsg.mode ?? 'legacy';
+      addStatusMessage(`Session: ${connMsg.sessionId} (${sessionMode})`);
       return;
+    }
 
     case 'agent_response': {
       clearBackendTimeout();
@@ -136,10 +142,29 @@ async function handleServerMessage(msg: WSMessage): Promise<void> {
       pageDescriptionText.textContent = response.text;
       addAgentMessage(response.text);
       speak(response.text);
-      await processAgentActions(response.actions);
-      if (response.actions.length === 0) {
+      if (sessionMode === 'legacy') {
+        await processAgentActions(response.actions);
+        if (response.actions.length === 0) {
+          clearProcessingState();
+        }
+      } else {
+        // In live mode, agent_response with no actions means turn complete
         clearProcessingState();
       }
+      return;
+    }
+
+    case 'tool_call': {
+      clearBackendTimeout();
+      const tcMsg = msg as ToolCallMessage;
+      // Show any text that came before the tool call
+      if (tcMsg.text) {
+        pageDescriptionText.textContent = tcMsg.text;
+        addAgentMessage(tcMsg.text);
+        speak(tcMsg.text);
+      }
+      // Execute the action and send result back
+      await handleToolCall(tcMsg.callId, tcMsg.action);
       return;
     }
 
@@ -149,6 +174,61 @@ async function handleServerMessage(msg: WSMessage): Promise<void> {
       clearProcessingState();
       return;
   }
+}
+
+// --- Live API Tool Call Handling ---
+
+async function handleToolCall(callId: string, action: AgentAction): Promise<void> {
+  setProcessingState('Executing...');
+
+  // Check confirmation
+  const shouldRun = await requestActionConfirmationIfNeeded(action);
+  if (!shouldRun) {
+    const cancelDesc = languageMode === 'zh' ? '用户取消了该操作' : 'User cancelled this action';
+    sendToolResponse(callId, action.type, false, cancelDesc);
+    clearProcessingState();
+    return;
+  }
+
+  // Execute the action
+  const result = await executeAction(action);
+  addStatusMessage(`${describeAction(action)}: ${result.success ? 'OK' : result.description}`);
+
+  // Wait for page to settle, then capture screenshot and send result
+  await delay(500);
+  const screenshot = await captureCurrentScreenshotMessage();
+
+  // Send tool response with result
+  sendToolResponse(callId, action.type, result.success, result.description);
+
+  // Also send the post-action screenshot for verification
+  if (screenshot) {
+    const verifyMsg: ActionResultMessage = {
+      type: 'action_result',
+      success: result.success,
+      description: result.description,
+      action,
+      languageMode,
+      screenshot,
+    };
+    sendMessage(verifyMsg);
+  }
+
+  setProcessingState('Verifying...');
+  startBackendTimeout('action verification');
+}
+
+function sendToolResponse(callId: string, actionName: string, success: boolean, description: string): void {
+  const msg: ToolResponseMessage = {
+    type: 'tool_response',
+    callId,
+    result: {
+      name: actionName,
+      success,
+      description,
+    },
+  };
+  sendMessage(msg);
 }
 
 // --- Voice Input ---
@@ -274,6 +354,17 @@ function speak(text: string): void {
 
 async function handleUserInput(text: string): Promise<void> {
   addUserMessage(text);
+
+  // Check for about:blank or empty page
+  const tab = await findWebTab();
+  if (!tab || tab.url === 'about:blank' || !tab.url) {
+    const msg = languageMode === 'zh'
+      ? '当前页面为空白页，请先打开一个网页。'
+      : 'Current page is blank. Please open a webpage first.';
+    addErrorMessage(msg);
+    speak(msg);
+    return;
+  }
 
   const screenshot = await captureCurrentScreenshotMessage();
   if (!screenshot) {
@@ -757,12 +848,38 @@ function setupTabListeners(): void {
   });
 }
 
+// --- Network Status ---
+
+function setupNetworkListeners(): void {
+  const updateOnlineStatus = () => {
+    if (!navigator.onLine) {
+      voiceBtn.disabled = true;
+      voiceBtn.classList.add('voice-btn--disabled');
+      addStatusMessage(languageMode === 'zh' ? '网络已断开，请检查连接。' : 'Network offline. Please check your connection.');
+    } else {
+      voiceBtn.disabled = false;
+      voiceBtn.classList.remove('voice-btn--disabled');
+      addStatusMessage(languageMode === 'zh' ? '网络已恢复。' : 'Network restored.');
+    }
+  };
+
+  window.addEventListener('online', updateOnlineStatus);
+  window.addEventListener('offline', updateOnlineStatus);
+
+  // Check initial state
+  if (!navigator.onLine) {
+    voiceBtn.disabled = true;
+    voiceBtn.classList.add('voice-btn--disabled');
+  }
+}
+
 // --- Init ---
 
 async function init(): Promise<void> {
   await loadSettings();
   initSpeechRecognition();
   setupTabListeners();
+  setupNetworkListeners();
   void connectWebSocket();
 
   const result = await chrome.storage.local.get(STORAGE_KEYS.onboardingComplete);

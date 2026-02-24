@@ -96,21 +96,59 @@ function safeJsonParse(text: string): Record<string, unknown> {
   }
 }
 
-function sanitizeActions(rawActions: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(rawActions)) return [];
+function sanitizeActions(
+  rawActions: unknown,
+  screenshotWidth?: number,
+  screenshotHeight?: number,
+): { actions: Array<Record<string, unknown>>; warnings: string[] } {
+  if (!Array.isArray(rawActions)) return { actions: [], warnings: [] };
 
-  return rawActions
-    .filter((item) => item && typeof item === 'object')
-    .map((item) => {
-      const action = { ...(item as Record<string, unknown>) };
-      if (typeof action.confirm !== 'boolean') {
-        delete action.confirm;
+  const maxX = screenshotWidth ?? 2560;
+  const maxY = screenshotHeight ?? 1440;
+  const actions: Array<Record<string, unknown>> = [];
+  const warnings: string[] = [];
+
+  for (const item of rawActions) {
+    if (!item || typeof item !== 'object') continue;
+    const action = { ...(item as Record<string, unknown>) };
+
+    if (typeof action.confirm !== 'boolean') delete action.confirm;
+    if (typeof action.confirmPrompt !== 'string') delete action.confirmPrompt;
+
+    const type = action.type;
+
+    // Validate coordinates for click, type_text, hover
+    if (type === 'click' || type === 'type_text' || type === 'hover') {
+      const x = Number(action.x);
+      const y = Number(action.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > maxX || y > maxY) {
+        warnings.push(`Removed ${type} action: coordinates (${x}, ${y}) out of bounds [0-${maxX}, 0-${maxY}]`);
+        continue;
       }
-      if (typeof action.confirmPrompt !== 'string') {
-        delete action.confirmPrompt;
+    }
+
+    // Validate scroll amount
+    if (type === 'scroll') {
+      const amount = Number(action.amount);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 5000) {
+        warnings.push(`Removed scroll action: amount ${amount} out of range (0-5000]`);
+        continue;
       }
-      return action;
-    });
+    }
+
+    // Validate navigate URL
+    if (type === 'navigate') {
+      const url = String(action.url ?? '');
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        warnings.push(`Removed navigate action: invalid URL "${url}"`);
+        continue;
+      }
+    }
+
+    actions.push(action);
+  }
+
+  return { actions, warnings };
 }
 
 function buildCurrentTurnText(input: AgentTurnInput): string {
@@ -189,26 +227,53 @@ export async function handleAgentTurn(input: AgentTurnInput): Promise<AgentRespo
       parts: currentParts,
     });
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: 'application/json',
-      },
-    });
+    let response;
+    try {
+      response = await Promise.race([
+        ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            responseMimeType: 'application/json',
+          },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Gemini API timeout (15s)')), 15000),
+        ),
+      ]);
+    } catch (firstErr) {
+      console.warn('Gemini API first attempt failed, retrying:', (firstErr as Error).message);
+      response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+        },
+      });
+    }
 
     const parsed = safeJsonParse(response.text ?? '{}');
-    const text = typeof parsed.text === 'string' && parsed.text.trim()
+    const screenshotW = Math.round(input.viewportWidth * input.devicePixelRatio);
+    const screenshotH = Math.round(input.viewportHeight * input.devicePixelRatio);
+    const { actions, warnings } = sanitizeActions(parsed.actions, screenshotW, screenshotH);
+
+    let text = typeof parsed.text === 'string' && parsed.text.trim()
       ? parsed.text
       : (input.inputType === 'action_result'
           ? 'Action checked. Let me know your next step.'
           : 'I analyzed the page.');
 
+    if (warnings.length > 0) {
+      console.warn('[Agent] Action validation warnings:', warnings);
+      text += '\n(Some actions were skipped due to invalid coordinates.)';
+    }
+
     return {
       type: 'agent_response',
       text,
-      actions: sanitizeActions(parsed.actions),
+      actions,
     };
   } catch (err) {
     console.error('Gemini API error:', err);

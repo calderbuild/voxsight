@@ -37,19 +37,32 @@ extension/
   manifest.json         -- Source manifest (build.mjs rewrites paths into dist/)
 
 backend/
-  server.ts             -- HTTP health check + WebSocketServer, session management
-  agent.ts              -- Gemini multimodal agent (gemini-2.5-flash, structured JSON output)
+  server.ts             -- HTTP health check + WebSocketServer, session management, Live/Legacy routing
+  live-agent.ts         -- Gemini Live API client (ai.live.connect, function declarations, bidi streaming)
+  agent.ts              -- Legacy Gemini agent (generateContent, structured JSON output, fallback)
+  auth.ts               -- HMAC-SHA256 WebSocket authentication
 ```
 
 ## Key Data Flow
 
-1. Side Panel finds a scriptable web tab via `findWebTab()` (skips chrome://, about:, Web Store)
+### Live API Mode (Production, Cloud Run)
+
+1. Side Panel finds scriptable web tab via `findWebTab()` (skips chrome://, about:, Web Store)
 2. Side Panel sends `{ action: 'captureScreenshot', tabId }` to Background Service Worker
 3. Background calls `captureVisibleTab(windowId)` + `executeScript` for viewport info
-4. Side Panel sends screenshot + user text to Backend via WebSocket
-5. Backend sends base64 JPEG + prompt to Gemini, gets structured JSON `{ text, actions[] }`
+4. Side Panel resizes screenshot to max 1280px via canvas, sends to Backend via WebSocket
+5. Backend sends screenshot via `session.sendRealtimeInput()` + text via `session.sendClientContent()`
+6. Gemini responds with text parts (streamed) and/or function calls (tool_call)
+7. Backend forwards tool_call to Side Panel; Side Panel executes via Content Script
+8. Content Script converts screenshot-space coordinates to CSS via `coord / devicePixelRatio`
+9. Side Panel sends tool_response + post-action screenshot back for verification
+
+### Legacy Mode (Local dev with proxy, or `USE_LIVE_API=false`)
+
+Same as steps 1-4, then:
+5. Backend calls `generateContent` with structured JSON output `{ text, actions[] }`
 6. Side Panel displays text, speaks via TTS, forwards each action to Content Script
-7. Content Script converts screenshot-space coordinates to CSS via `coord / devicePixelRatio`
+7. Content Script converts coordinates, executes actions
 
 ## Important Constraints
 
@@ -58,7 +71,8 @@ backend/
 - Content scripts only inject into pages opened **after** extension load; user must refresh pre-existing tabs
 - MV3 Service Worker is killed after ~30s idle; WebSocket lives in Side Panel (persistent DOM), not SW
 - Backend needs `HTTPS_PROXY` for Gemini API access from China; configured via `undici.ProxyAgent` + `setGlobalDispatcher`
-- Gemini model name: `gemini-2.5-flash` (not preview variants)
+- Gemini models: `gemini-live-2.5-flash-preview` (Live API), `gemini-2.5-flash` (legacy fallback)
+- Live API WebSocket bypasses undici proxy -- set `USE_LIVE_API=false` when using HTTP proxy locally
 - Screenshot coordinates are in image pixel space; content script divides by `devicePixelRatio` for CSS pixels
 
 ## Gotchas
@@ -70,3 +84,6 @@ backend/
 | `SpeechRecognition` types missing in TypeScript | `src/shared/speech.d.ts` declares interfaces + Window augmentation |
 | Content script not responding on old tabs | User must refresh page after extension install/reload |
 | `executeScript` fails on Chrome Web Store pages | `isScriptableUrl()` checks URL prefix and hostname; falls back to `tab.width`/`tab.height` |
+| Live API WebSocket hangs with HTTP proxy | `undici.ProxyAgent` only patches fetch, not WebSocket. Set `USE_LIVE_API=false` for local dev |
+| `elementFromPoint` returns null | Content script searches nearby coordinates (+-10px spiral) via `findNearbyElement()` |
+| Gemini returns out-of-bounds coordinates | `sanitizeActions()` validates x/y against screenshot dimensions; removes invalid actions |

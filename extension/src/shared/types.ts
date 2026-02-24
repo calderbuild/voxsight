@@ -134,6 +134,26 @@ export interface ErrorMessage {
 export interface ConnectedMessage {
   type: 'connected';
   sessionId: string;
+  mode?: 'live' | 'legacy';
+}
+
+// Live API: server asks client to execute a tool call (action)
+export interface ToolCallMessage {
+  type: 'tool_call';
+  callId: string;
+  action: AgentAction;
+  text?: string; // optional spoken text before the action
+}
+
+// Live API: client sends tool execution result back to server
+export interface ToolResponseMessage {
+  type: 'tool_response';
+  callId: string;
+  result: {
+    name: string;
+    success: boolean;
+    description: string;
+  };
 }
 
 export type WSMessage =
@@ -141,7 +161,9 @@ export type WSMessage =
   | AgentResponseMessage
   | ActionResultMessage
   | ErrorMessage
-  | ConnectedMessage;
+  | ConnectedMessage
+  | ToolCallMessage
+  | ToolResponseMessage;
 
 // Internal Chrome extension messages (between components)
 
