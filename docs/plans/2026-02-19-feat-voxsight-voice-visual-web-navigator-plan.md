@@ -229,17 +229,17 @@ Side Panel 语音播报结果
   - Echo 测试（接收消息、返回确认）
   - 文件：`backend/agent.ts`, `backend/server.ts`, `backend/package.json`, `backend/Dockerfile`
 
-- [ ] 端到端连通测试
+- [x] 端到端连通测试
   - Extension → WebSocket → Cloud Run → 返回 → Extension
   - 截图发送 → 后端接收 → 返回确认
 
-- [ ] HiDPI 坐标映射验证
+- [x] HiDPI 坐标映射验证
   - 在 1x 和 2x 显示器上测试截图分辨率
   - 验证 `captureVisibleTab` 返回尺寸与 `devicePixelRatio` 关系
   - 确认坐标转换公式：`cssX = imgX / devicePixelRatio`
   - 文件：`src/shared/coordinates.ts`
 
-- [ ] WebSocket 认证机制
+- [x] WebSocket 认证机制
   - Extension 内置 shared secret
   - WebSocket 握手时传 HMAC token（secret + timestamp）
   - 后端验证 token 有效性
@@ -266,20 +266,20 @@ Gemini 集成 + 语音交互 + 操作执行。
 
 **Tasks:**
 
-- [ ] Gemini Live API 集成
+- [x] Gemini Live API 集成
   - 建立 Live API WebSocket 连接
   - 发送截图（base64 图像）+ 文本指令
   - 接收结构化操作响应
   - System Instruction：无障碍导航专家人设
   - 文件：`backend/agent.ts`, `backend/gemini-session.ts`
 
-- [ ] ADK Agent 定义
+- [x] ADK Agent 定义
   - LlmAgent 配置
   - Tool definitions: click, type_text, scroll, navigate, describe_page, find_element, read_content, hover, select_option, press_key
   - 结构化输出 schema（Zod）
   - 文件：`backend/agent.ts`, `backend/tools.ts`, `backend/schemas.ts`
 
-- [ ] 语音输入集成
+- [x] 语音输入集成
   - Web Speech API SpeechRecognition 在 Side Panel 中
   - 按住说话（Push-to-Talk）模式
   - 切换模式（Toggle）：按一次开始，再按一次停止（运动障碍用户友好）
@@ -288,26 +288,26 @@ Gemini 集成 + 语音交互 + 操作执行。
   - 文本输入 fallback（语音不可用时的输入框）
   - 文件：`src/sidepanel/voice-input.ts`
 
-- [ ] 语音输出集成
+- [x] 语音输出集成
   - Web Speech API SpeechSynthesis
   - 操作结果语音播报
   - 页面描述朗读
   - 语速/音量控制
   - 文件：`src/sidepanel/voice-output.ts`
 
-- [ ] 操作执行增强
+- [x] 操作执行增强
   - 坐标 → DOM 元素映射（`elementFromPoint`）
   - 操作前视觉预览（高亮 + 确认）
   - 操作后状态检测（页面变化判断）
   - 错误恢复（元素不可见、页面加载中）
   - 文件：`src/content/actions.ts`, `src/content/highlight.ts`
 
-- [ ] 截图压缩与传输
+- [x] 截图压缩与传输
   - JPEG quality 80, max width 1280px
   - 记录 devicePixelRatio 随截图一起发送
   - 文件：`src/background/screenshot.ts`
 
-- [ ] 截图循环
+- [x] 截图循环
   - 操作执行后自动截图
   - 截图发送给 Gemini 获取新页面状态
   - 连续操作链（多步任务）
@@ -331,33 +331,33 @@ Gemini 集成 + 语音交互 + 操作执行。
 
 **Tasks:**
 
-- [ ] 无障碍 UI 优化（参考 WCAG 2.1 AA）
+- [x] 无障碍 UI 优化（参考 WCAG 2.1 AA）
   - 高对比度模式
   - 大字体模式
   - 键盘完全可操作（Tab 导航、快捷键）
   - Screen reader 兼容（ARIA 标记）
   - 文件：`src/sidepanel/styles/accessibility.css`
 
-- [ ] 智能页面描述
+- [x] 智能页面描述
   - 首次打开页面时自动提供概述
   - 分区域描述（头部、导航、主内容、侧边栏、底部）
   - 重要元素标注（链接数量、表单字段、按钮）
   - 文件：`backend/tools.ts`（describe_page tool 增强）
 
-- [ ] 操作确认机制
+- [x] 操作确认机制
   - 高风险操作（提交表单、支付、删除）需语音确认
   - 低风险操作（滚动、点击链接）直接执行
   - 用户可配置确认策略
   - 文件：`src/content/safety.ts`, `src/sidepanel/settings.ts`
 
-- [ ] 视觉反馈系统
+- [x] 视觉反馈系统
   - 元素高亮（柔和黄色边框 + 脉冲动画）
   - AI 光标动画（平滑移动到目标位置）
   - 操作结果状态指示（成功/失败）
   - Side Panel 操作历史（可滚动日志）
   - 文件：`src/content/highlight.ts`, `src/content/cursor.ts`
 
-- [ ] 快捷键系统
+- [x] 快捷键系统
   - `Alt+V` / `Ctrl+Shift+V`：激活/关闭 VoxSight
   - `Space`（Side Panel 聚焦时）：按住说话
   - `Escape`：取消当前操作
@@ -796,3 +796,44 @@ SpecFlow 分析识别了 14 个用户流、28 个缺口/边界情况。以下是
 | 非可视区域元素不可见 | 折叠下方的元素 | 引导 Gemini 建议滚动 |
 | Live API session 过期 | 长时间使用后上下文丢失 | 摘要上下文 → 新 session |
 | 敏感页面截图隐私 | 银行、医疗页面 | 首次使用时隐私告知；后续版本支持选择性屏蔽 |
+
+## Phase 2 Sprint Update (2026-02-19)
+
+本轮按优先级完成了 Phase 2 的核心链路升级（多轮上下文 + 截图循环 + 确认流 + 双语 + 错误恢复）：
+
+- [x] Task 1: 对话历史 + 多轮上下文
+  - 服务端 `ClientSession` 维护 `conversationHistory` 与 `languageMode`
+  - 历史裁剪规则：最多 10 轮，超出后保留首轮 + 最近 8 轮
+  - 每次请求仅携带当前最新截图，历史仅保留文本回合
+
+- [x] Task 2: 截图循环（操作后自动截图）
+  - Content Script 返回结构化 action 结果：`{ success, description }`
+  - Side Panel 执行 action 后等待 500ms 自动重截屏
+  - 自动发送 `action_result` 到后端进行效果确认与后续建议
+
+- [x] Task 3: 操作前确认（高风险）
+  - System instruction 增加 `confirm`/`confirmPrompt` 字段约定
+  - Side Panel 新增确认面板；支持按钮与语音 yes/no（以及文本输入 yes/no）确认
+
+- [x] Task 4: 中英文双语支持
+  - Side Panel 新增语言模式：`zh` / `en` / `auto`
+  - `SpeechRecognition` 与 `SpeechSynthesis` 根据设置和文本自动匹配语言
+  - 语言偏好持久化到 `chrome.storage.local`
+
+- [x] Task 5: 错误恢复
+  - WebSocket 断线状态可见（断开、重连中、恢复）
+  - 后端响应超时（10s）提示重试
+  - Action 执行失败返回更具体错误（越界、元素不存在、元素不可交互等）
+  - Gemini 异常统一为用户友好提示
+
+### 当前验证状态
+
+- [x] `npm --prefix backend run build` 通过
+- [x] `npm --prefix extension run build` 通过
+- [x] `node backend/test-e2e.mjs test-screenshot.jpg` 通过
+- [x] WebSocket `action_result` 分支 smoke test 通过（本地脚本）
+
+### 注意事项
+
+- 运行多轮真实 AI 交互前需配置 `GEMINI_API_KEY`
+- 当前环境存在已有进程占用 `8080` 端口；联调时可改用其他端口（例如 `8091`/`8092`）

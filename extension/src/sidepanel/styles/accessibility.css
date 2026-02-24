@@ -1,0 +1,226 @@
+/* High-contrast mode */
+body.high-contrast {
+  --bg-top: #000;
+  --bg-bottom: #000;
+  --panel-bg: #000;
+  --panel-border: #fff;
+  --panel-shadow: none;
+  --ink-strong: #fff;
+  --ink-soft: #ccc;
+  --accent: #ffff00;
+  --accent-deep: #ffff00;
+  --accent-warm: #ffff00;
+  --success: #0f0;
+  --danger: #f00;
+}
+
+body.high-contrast::before {
+  display: none;
+}
+
+body.high-contrast .panel {
+  border-width: 2px;
+}
+
+body.high-contrast .message--user {
+  background: #ffff00;
+  color: #000;
+}
+
+body.high-contrast .message--agent {
+  background: #000;
+  color: #fff;
+  border-color: #fff;
+}
+
+body.high-contrast .message--error {
+  background: #300;
+  color: #f88;
+  border-color: #f00;
+}
+
+body.high-contrast .message--status {
+  background: #111;
+  color: #ccc;
+  border-color: #666;
+}
+
+body.high-contrast .voice-btn {
+  background: #ffff00;
+  color: #000;
+  box-shadow: none;
+  border: 2px solid #fff;
+}
+
+body.high-contrast .voice-btn--listening {
+  background: #f00;
+  color: #fff;
+}
+
+body.high-contrast .voice-btn--processing {
+  background: #ff0;
+  color: #000;
+}
+
+body.high-contrast .quick-btn {
+  background: #000;
+  color: #fff;
+  border: 2px solid #fff;
+}
+
+body.high-contrast .quick-btn:hover {
+  background: #ffff00;
+  color: #000;
+}
+
+body.high-contrast .text-input {
+  background: #000;
+  color: #fff;
+  border-color: #fff;
+}
+
+body.high-contrast .confirm-panel {
+  background: #220;
+  border-color: #ff0;
+}
+
+body.high-contrast .confirm-panel__text {
+  color: #ff0;
+}
+
+body.high-contrast .confirm-btn--yes {
+  background: #ffff00;
+  color: #000;
+}
+
+body.high-contrast .confirm-btn--no {
+  background: #000;
+  color: #fff;
+  border-color: #fff;
+}
+
+body.high-contrast .conversation {
+  background: #111;
+}
+
+body.high-contrast .language-picker {
+  background: #000;
+  border-color: #fff;
+}
+
+body.high-contrast .language-picker__select {
+  color: #fff;
+}
+
+/* Font size modes */
+body.font-large {
+  font-size: 18px;
+}
+
+body.font-large .header__title {
+  font-size: 26px;
+}
+
+body.font-large .message {
+  font-size: 16px;
+}
+
+body.font-large .voice-btn__label {
+  font-size: 14px;
+}
+
+body.font-large .quick-btn {
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+body.font-xlarge {
+  font-size: 22px;
+}
+
+body.font-xlarge .header__title {
+  font-size: 30px;
+}
+
+body.font-xlarge .message {
+  font-size: 20px;
+}
+
+body.font-xlarge .voice-btn__label {
+  font-size: 16px;
+}
+
+body.font-xlarge .quick-btn {
+  font-size: 16px;
+  padding: 12px 14px;
+}
+
+/* Settings bar */
+.settings-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.settings-btn {
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--ink-strong);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.settings-btn:hover {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.settings-btn--active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+body.high-contrast .settings-btn {
+  background: #000;
+  color: #fff;
+  border-color: #fff;
+}
+
+body.high-contrast .settings-btn--active {
+  background: #ffff00;
+  color: #000;
+  border-color: #ffff00;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .fade-in,
+  .message,
+  .confirm-panel {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .status-dot {
+    animation: none;
+  }
+
+  .voice-btn--listening {
+    animation: none;
+    box-shadow: 0 0 0 4px rgba(206, 60, 45, 0.5);
+  }
+}
+
+/* Focus styles for keyboard navigation */
+.settings-btn:focus-visible,
+.quick-btn:focus-visible,
+.voice-btn:focus-visible,
+.confirm-btn:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}

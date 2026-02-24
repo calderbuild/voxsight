@@ -11,7 +11,7 @@ import type {
   UserCommandMessage,
   WSMessage,
 } from '../shared/types';
-import { BACKEND_URL, STORAGE_KEYS } from '../shared/constants';
+import { BACKEND_URL, SCREENSHOT_CONFIG, STORAGE_KEYS } from '../shared/constants';
 import { createAuthenticatedWebSocketUrl } from '../shared/auth';
 
 // DOM elements
@@ -28,6 +28,8 @@ const confirmPanel = document.getElementById('confirmPanel') as HTMLElement;
 const confirmText = document.getElementById('confirmText') as HTMLElement;
 const confirmYesBtn = document.getElementById('confirmYesBtn') as HTMLButtonElement;
 const confirmNoBtn = document.getElementById('confirmNoBtn') as HTMLButtonElement;
+const contrastBtn = document.getElementById('contrastBtn') as HTMLButtonElement;
+const fontSizeBtn = document.getElementById('fontSizeBtn') as HTMLButtonElement;
 
 // State
 let ws: WebSocket | null = null;
@@ -45,8 +47,12 @@ interface PendingConfirmation {
 
 let pendingConfirmation: PendingConfirmation | null = null;
 
+type FontSizeMode = 'normal' | 'large' | 'xlarge';
+
 interface SidePanelSettings {
   languageMode: LanguageMode;
+  highContrast: boolean;
+  fontSizeMode: FontSizeMode;
 }
 
 const BACKEND_TIMEOUT_MS = 10_000;
@@ -472,6 +478,35 @@ async function captureScreenshot(tabId?: number): Promise<CaptureScreenshotRespo
   });
 }
 
+async function resizeScreenshot(
+  dataUrl: string,
+  maxWidth: number,
+  quality: number,
+): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      if (img.width <= maxWidth) {
+        resolve(dataUrl);
+        return;
+      }
+      const scale = maxWidth / img.width;
+      const canvas = document.createElement('canvas');
+      canvas.width = maxWidth;
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality / 100));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 async function captureCurrentScreenshotMessage(): Promise<ScreenshotMessage | null> {
   const tab = await findWebTab();
   if (!tab?.id) {
@@ -484,9 +519,15 @@ async function captureCurrentScreenshotMessage(): Promise<ScreenshotMessage | nu
     return null;
   }
 
+  const resized = await resizeScreenshot(
+    screenshot.image,
+    SCREENSHOT_CONFIG.maxWidth,
+    SCREENSHOT_CONFIG.quality,
+  );
+
   return {
     type: 'screenshot',
-    image: screenshot.image,
+    image: resized,
     devicePixelRatio: screenshot.devicePixelRatio,
     viewportWidth: screenshot.viewportWidth,
     viewportHeight: screenshot.viewportHeight,
@@ -563,6 +604,27 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// --- Accessibility ---
+
+let highContrast = false;
+let fontSizeMode: FontSizeMode = 'normal';
+
+function applyHighContrast(enabled: boolean): void {
+  highContrast = enabled;
+  document.body.classList.toggle('high-contrast', enabled);
+  contrastBtn.classList.toggle('settings-btn--active', enabled);
+}
+
+function cycleFontSize(): void {
+  const modes: FontSizeMode[] = ['normal', 'large', 'xlarge'];
+  const idx = modes.indexOf(fontSizeMode);
+  fontSizeMode = modes[(idx + 1) % modes.length];
+  document.body.classList.remove('font-large', 'font-xlarge');
+  if (fontSizeMode === 'large') document.body.classList.add('font-large');
+  if (fontSizeMode === 'xlarge') document.body.classList.add('font-xlarge');
+  fontSizeBtn.textContent = fontSizeMode === 'normal' ? 'A+' : fontSizeMode === 'large' ? 'A++' : 'A';
+}
+
 // --- Settings ---
 
 async function loadSettings(): Promise<void> {
@@ -572,10 +634,16 @@ async function loadSettings(): Promise<void> {
     ? settings.languageMode
     : 'auto';
   languageSelect.value = languageMode;
+  if (settings.highContrast) applyHighContrast(true);
+  if (settings.fontSizeMode === 'large' || settings.fontSizeMode === 'xlarge') {
+    fontSizeMode = 'normal'; // cycleFontSize will advance it
+    if (settings.fontSizeMode === 'large') cycleFontSize();
+    if (settings.fontSizeMode === 'xlarge') { cycleFontSize(); cycleFontSize(); }
+  }
 }
 
 function persistSettings(): void {
-  const settings: SidePanelSettings = { languageMode };
+  const settings: SidePanelSettings = { languageMode, highContrast, fontSizeMode };
   chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings });
 }
 
@@ -592,12 +660,33 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     if (!isListening) startListening();
   }
+  if (event.code === 'Escape') {
+    event.preventDefault();
+    if (pendingConfirmation) {
+      resolveConfirmation(false);
+      return;
+    }
+    if (isListening) {
+      stopListening();
+      return;
+    }
+    synthesis.cancel();
+    clearBackendTimeout();
+    clearProcessingState();
+  }
 });
 
 document.addEventListener('keyup', (event) => {
   if (event.code === 'Space' && isListening) {
     event.preventDefault();
     stopListening();
+  }
+});
+
+// Listen for shortcut messages from background
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.action === 'describePage') {
+    void handleUserInput('Describe this page');
   }
 });
 
@@ -619,6 +708,16 @@ readBtn.addEventListener('click', () => void handleUserInput('Read the main cont
 confirmYesBtn.addEventListener('click', () => resolveConfirmation(true));
 confirmNoBtn.addEventListener('click', () => resolveConfirmation(false));
 
+contrastBtn.addEventListener('click', () => {
+  applyHighContrast(!highContrast);
+  persistSettings();
+});
+
+fontSizeBtn.addEventListener('click', () => {
+  cycleFontSize();
+  persistSettings();
+});
+
 languageSelect.addEventListener('change', () => {
   const selected = languageSelect.value;
   languageMode = selected === 'zh' || selected === 'en' || selected === 'auto' ? selected : 'auto';
@@ -628,11 +727,42 @@ languageSelect.addEventListener('change', () => {
   addStatusMessage(msg);
 });
 
+// --- Auto Page Description ---
+
+let lastDescribedTabId: number | null = null;
+let lastDescribedUrl: string | null = null;
+
+function autoDescribePage(tabId: number, url: string): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (tabId === lastDescribedTabId && url === lastDescribedUrl) return;
+  if (!isScriptableUrl(url)) return;
+
+  lastDescribedTabId = tabId;
+  lastDescribedUrl = url;
+
+  const summaryLabel = languageMode === 'zh' ? '正在分析新页面...' : 'Analyzing new page...';
+  pageDescriptionText.textContent = summaryLabel;
+}
+
+function setupTabListeners(): void {
+  chrome.tabs.onActivated.addListener((activeInfo) => {
+    chrome.tabs.get(activeInfo.tabId, (tab) => {
+      if (tab?.url) autoDescribePage(activeInfo.tabId, tab.url);
+    });
+  });
+
+  chrome.webNavigation?.onCompleted.addListener((details) => {
+    if (details.frameId !== 0) return;
+    autoDescribePage(details.tabId, details.url);
+  });
+}
+
 // --- Init ---
 
 async function init(): Promise<void> {
   await loadSettings();
   initSpeechRecognition();
+  setupTabListeners();
   void connectWebSocket();
 
   const result = await chrome.storage.local.get(STORAGE_KEYS.onboardingComplete);

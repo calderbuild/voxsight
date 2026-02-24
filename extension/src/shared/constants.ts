@@ -1,5 +1,7 @@
-export const BACKEND_URL = 'ws://localhost:8080';
-export const BACKEND_URL_PROD = ''; // Set after Cloud Run deployment
+const BACKEND_URL_DEV = 'ws://localhost:8080';
+const BACKEND_URL_PROD = ''; // Set after Cloud Run deployment, e.g. 'wss://voxsight-backend-xxxxx.run.app'
+
+export const BACKEND_URL = BACKEND_URL_PROD || BACKEND_URL_DEV;
 
 export const COLORS = {
   primary: '#1A73E8',
