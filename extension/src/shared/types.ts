@@ -145,6 +145,12 @@ export interface ToolCallMessage {
   text?: string; // optional spoken text before the action
 }
 
+// Live API: streaming text chunk from server (displayed incrementally)
+export interface TextDeltaMessage {
+  type: 'text_delta';
+  delta: string; // partial text chunk
+}
+
 // Live API: client sends tool execution result back to server
 export interface ToolResponseMessage {
   type: 'tool_response';
@@ -163,7 +169,8 @@ export type WSMessage =
   | ErrorMessage
   | ConnectedMessage
   | ToolCallMessage
-  | ToolResponseMessage;
+  | ToolResponseMessage
+  | TextDeltaMessage;
 
 // Internal Chrome extension messages (between components)
 

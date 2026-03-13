@@ -8,6 +8,7 @@ import type {
   ExecuteActionResponse,
   LanguageMode,
   ScreenshotMessage,
+  TextDeltaMessage,
   ToolCallMessage,
   ToolResponseMessage,
   UserCommandMessage,
@@ -42,6 +43,8 @@ let languageMode: LanguageMode = 'auto';
 let backendTimeoutId: number | null = null;
 let waitingForConnectionRecovery = false;
 let sessionMode: 'live' | 'legacy' = 'legacy';
+let streamingMessageEl: HTMLElement | null = null; // current streaming message bubble
+let streamingText = ''; // accumulated text for current stream
 
 interface PendingConfirmation {
   action: AgentAction;
@@ -136,12 +139,26 @@ async function handleServerMessage(msg: WSMessage): Promise<void> {
       return;
     }
 
+    case 'text_delta': {
+      // Live API: streaming text chunk -- display incrementally
+      clearBackendTimeout();
+      const deltaMsg = msg as TextDeltaMessage;
+      appendStreamingDelta(deltaMsg.delta);
+      startBackendTimeout('streaming response');
+      return;
+    }
+
     case 'agent_response': {
       clearBackendTimeout();
+      // Finalize any in-progress streaming message first
+      finalizeStreamingMessage();
       const response = msg as AgentResponseMessage;
-      pageDescriptionText.textContent = response.text;
-      addAgentMessage(response.text);
-      speak(response.text);
+      // Only add a new message if there wasn't a streaming one
+      if (!streamingMessageEl && response.text) {
+        pageDescriptionText.textContent = response.text;
+        addAgentMessage(response.text);
+        speak(response.text);
+      }
       if (sessionMode === 'legacy') {
         await processAgentActions(response.actions);
         if (response.actions.length === 0) {
@@ -156,9 +173,11 @@ async function handleServerMessage(msg: WSMessage): Promise<void> {
 
     case 'tool_call': {
       clearBackendTimeout();
+      // Finalize any streaming text before executing action
+      finalizeStreamingMessage();
       const tcMsg = msg as ToolCallMessage;
-      // Show any text that came before the tool call
-      if (tcMsg.text) {
+      // Show any text that came before the tool call (from non-streaming path)
+      if (tcMsg.text && !streamingText) {
         pageDescriptionText.textContent = tcMsg.text;
         addAgentMessage(tcMsg.text);
         speak(tcMsg.text);
@@ -689,6 +708,31 @@ function addStatusMessage(text: string): void {
   div.textContent = text;
   conversation.appendChild(div);
   conversation.scrollTop = conversation.scrollHeight;
+}
+
+// Streaming text: append delta to an in-progress agent message bubble
+function appendStreamingDelta(delta: string): void {
+  streamingText += delta;
+  if (!streamingMessageEl) {
+    streamingMessageEl = document.createElement('div');
+    streamingMessageEl.className = 'message message--agent message--streaming';
+    conversation.appendChild(streamingMessageEl);
+  }
+  streamingMessageEl.textContent = streamingText;
+  pageDescriptionText.textContent = streamingText;
+  conversation.scrollTop = conversation.scrollHeight;
+}
+
+// Finalize the streaming message: remove streaming class, speak, reset state
+function finalizeStreamingMessage(): void {
+  if (streamingMessageEl) {
+    streamingMessageEl.classList.remove('message--streaming');
+    streamingMessageEl = null;
+  }
+  if (streamingText) {
+    speak(streamingText);
+    streamingText = '';
+  }
 }
 
 function delay(ms: number): Promise<void> {

@@ -170,8 +170,11 @@ async function createLiveClientSession(
 
     switch (msg.type) {
       case 'text':
-        // Accumulate text parts; send when turn completes
+        // Stream text delta to client immediately for real-time feel
         clientSession.textBuffer += msg.text ?? '';
+        if (msg.text) {
+          ws.send(JSON.stringify({ type: 'text_delta', delta: msg.text }));
+        }
         break;
 
       case 'tool_call': {

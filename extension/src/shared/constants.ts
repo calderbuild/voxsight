@@ -1,5 +1,5 @@
 const BACKEND_URL_DEV = 'ws://localhost:8080';
-const BACKEND_URL_PROD = ''; // Set after Cloud Run deployment, e.g. 'wss://voxsight-backend-xxxxx.run.app'
+const BACKEND_URL_PROD = 'wss://voxsight-backend-du3mbljn2a-uc.a.run.app';
 
 export const BACKEND_URL = BACKEND_URL_PROD || BACKEND_URL_DEV;
 

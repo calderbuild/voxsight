@@ -241,6 +241,21 @@ body::before {
   border-bottom-left-radius: 3px;
 }
 
+.message--streaming {
+  border-color: var(--accent);
+  border-style: solid;
+}
+.message--streaming::after {
+  content: '\25CF';
+  animation: blink 1s steps(2) infinite;
+  margin-left: 2px;
+  color: var(--accent);
+}
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 .message--error {
   max-width: 100%;
   color: #7f2015;
