@@ -4,5 +4,6 @@ dist/
 *.log
 *.png
 *.jpg
+!image/store-ready/*.png
 .DS_Store
 .playwright-mcp/
